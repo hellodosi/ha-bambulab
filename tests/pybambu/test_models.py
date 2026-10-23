@@ -219,6 +219,53 @@ class TestPrintJob(unittest.TestCase):
         self.assertEqual(self.print_job.print_weight, 49.59)
         self.assertEqual(self.print_job.get_print_weights, {"External Spool": 49.59})
 
+    def test_direct_metadata_download_fallback(self):
+        """When no 3MF is found, fallback directly downloads slice_info and plate image from Metadata directory."""
+        self.client.ftp_enabled = True
+        self.client._device.supports_feature.return_value = True
+        self.client._device.external_spool[0].active = True
+        self.print_job.plate_idx = 2
+        self.print_job.ams_mapping = []
+        self.print_job.prune_print_history_files = MagicMock()
+
+        ftp_mock = MagicMock()
+        self.client.ftp_connection.return_value = ftp_mock
+
+        def mock_cwd(path):
+            if path == "/data/Metadata":
+                return
+            raise Exception(f"Directory {path} not found")
+
+        ftp_mock.cwd.side_effect = mock_cwd
+        ftp_mock.nlst.return_value = [
+            "slice_info.config",
+            "plate_2.png",
+            "plate_2.gcode",
+            "plate_2.json",
+        ]
+
+        def mock_retrbinary(cmd, callback):
+            if "slice_info.config" in cmd:
+                callback(
+                    b'<config><plate><metadata key="index" value="2" />'
+                    b'<metadata key="weight" value="32.85" /></plate></config>'
+                )
+            elif "plate_2.png" in cmd:
+                callback(b"direct-plate-cover-bytes")
+            elif "plate_2.json" in cmd:
+                callback(b'{"bed_type": "textured_plate"}')
+
+        ftp_mock.retrbinary.side_effect = mock_retrbinary
+
+        self.print_job._remote_media_sources = MagicMock(return_value=[MagicMock()])
+        self.print_job._attempt_remote_model_download = MagicMock(return_value=None)
+        self.print_job._close_remote_media_sources = MagicMock()
+
+        self.assertTrue(self.print_job._async_download_task_data_from_printer_worker())
+        self.assertEqual(self.print_job.print_weight, 32.85)
+        self.assertEqual(self.print_job.print_bed_type, "textured_plate")
+        self.client._device.cover_image.set_image.assert_called_with(b"direct-plate-cover-bytes")
+
     def test_prune_cleans_stale_part_files_even_when_pruning_disabled(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             stale_part = Path(temp_dir) / "stale.3mf.part"
