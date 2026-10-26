@@ -1457,13 +1457,13 @@ class PrintJob:
         remote_name = remote_file.basename.replace("\\", "/")
         return remote_path == candidate or remote_name == candidate.rsplit("/", 1)[-1]
 
-    def _model_candidate_score(self, remote_file: RemoteMediaFile) -> tuple[int, datetime, int, int]:
+    def _model_candidate_score(self, remote_file: RemoteMediaFile) -> tuple[int, int, int, datetime]:
         path = remote_file.path.replace("\\", "/").lower()
         name = remote_file.basename.lower()
         in_cache = 1 if "/cache/" in path or path.startswith("cache/") else 0
         gcode_3mf = 1 if name.endswith(".gcode.3mf") else 0
-        source_rank = 1 if remote_file.source == Tcp6000MediaSource.name else 0
-        return (in_cache, remote_file.sort_time, gcode_3mf, source_rank)
+        source_rank = 1 if remote_file.source == Ftps990MediaSource.name else 0
+        return (in_cache, gcode_3mf, source_rank, remote_file.sort_time)
 
     def _select_model_file(
         self,
@@ -1485,17 +1485,15 @@ class PrintJob:
                 if self._remote_model_matches(file, filename)
             ]
             if matches:
-                selected = sorted(matches, key=self._model_candidate_score, reverse=True)[0]
+                sorted_matches = sorted(matches, key=self._model_candidate_score, reverse=True)
                 LOGGER.debug(
-                    f"Selected model candidate {selected.path} from {selected.source}/{selected.storage}"
+                    f"Selected model candidate {sorted_matches[0].path} from {sorted_matches[0].source}/{sorted_matches[0].storage}"
                 )
-                return self._remote_file_aliases(matches, selected)
+                return sorted_matches
 
         LOGGER.debug("No candidate matched subtask name, falling back to newest remote 3mf file across media sources.")
-        sorted_files = sort_newest_first(remote_files)
-        if not sorted_files:
-            return []
-        return self._remote_file_aliases(remote_files, sorted_files[0])
+        sorted_files = sorted(remote_files, key=self._model_candidate_score, reverse=True)
+        return sorted_files
 
     def _model_cache_paths(self, remote_file: RemoteMediaFile) -> tuple[Path, Path]:
         cache_root = Path(self._client.cache_path) / "prints"

@@ -27,6 +27,7 @@ from pybambu.models import (
     ams_slot_name,
 )
 from pybambu.const import FansEnum, Printers
+from pybambu.media_sources import Ftps990MediaSource, RemoteMediaFile, Tcp6000MediaSource
 
 class TestPrintJob(unittest.TestCase):
     def setUp(self):
@@ -265,6 +266,28 @@ class TestPrintJob(unittest.TestCase):
         self.assertEqual(self.print_job.print_weight, 32.85)
         self.assertEqual(self.print_job.print_bed_type, "textured_plate")
         self.client._device.cover_image.set_image.assert_called_with(b"direct-plate-cover-bytes")
+
+    def test_select_model_files_prefers_ftps_and_retains_fallback(self):
+        ftps_file = RemoteMediaFile(
+            name="all_models.gcode.3mf",
+            path="/all_models.gcode.3mf",
+            size=1000,
+            media_type="model",
+            source=Ftps990MediaSource.name,
+            storage="external",
+        )
+        tcp_file = RemoteMediaFile(
+            name="all_models.gcode.3mf",
+            path="/userdata/model/history/all_models.gcode.3mf",
+            size=1000,
+            media_type="model",
+            source=Tcp6000MediaSource.name,
+            storage="emmc",
+        )
+        selected = self.print_job._select_model_files([tcp_file, ftps_file], ["all_models.gcode.3mf"])
+        self.assertEqual(len(selected), 2)
+        self.assertEqual(selected[0].source, Ftps990MediaSource.name)
+        self.assertEqual(selected[1].source, Tcp6000MediaSource.name)
 
     def test_prune_cleans_stale_part_files_even_when_pruning_disabled(self):
         with tempfile.TemporaryDirectory() as temp_dir:
