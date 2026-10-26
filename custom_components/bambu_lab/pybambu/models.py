@@ -199,7 +199,7 @@ class Device:
         elif feature == Features.CAMERA_IMAGE:
             return model in (a1_printers | a2_printers | p1_printers)
         elif feature == Features.SUPPORTS_EARLY_FTP_DOWNLOAD:
-            return model in (a1_printers | a2_printers | p1_printers)
+            return model in (a1_printers | a2_printers | p1_printers | p2_printers)
 
         # Now check that we have a version. All tests after this are expected to only be called after the
         # first full set of data from the printer has been received and so version will be available.
@@ -1181,15 +1181,12 @@ class PrintJob:
                     LOGGER.debug(f"DOWNLOAD TO PRINTER IS COMPLETE")
                     self._update_task_data()
 
-            if self.gcode_state == "RUNNING" and (previously_idle or previous_gcode_state == "PREPARE"):
-                # We haven't yet downloaded model data off the printer. I've observed three scenarios where this happens:
-                # 1. This is a lan mode print where the gcode was pushed to the printer before the print ever started so
-                # 2. On the P1 I've observed a bug where the download completes but the gcode_file_prepare_percent never reaches 100.
-                # If we transition to the running gcode_state without observing 100% we assume the download did actually complete.
-                # 3. On the X1C for a local Bambu Studio slice sent via the cloud we see the download percentage immediately
-                # jump to 100% at the same time we see the PREPARE phase start but if we try and download then, the model file
-                # is not present.
-                LOGGER.debug("REACHED RUNNING WITHOUT DOWNLOADING MODEL")
+            if self.gcode_state in ("RUNNING", "PAUSE", "FINISH"):
+                # We haven't yet downloaded model data off the printer. Scenarios where this happens:
+                # 1. This is a lan mode print where the gcode was pushed to the printer before the print ever started
+                # 2. On the P1/P2/A1 download completes or prepare_percent never reaches 100
+                # 3. Home Assistant restarted mid-print or upon print completion without previous state
+                LOGGER.debug(f"REACHED {self.gcode_state} WITHOUT DOWNLOADING MODEL")
                 self._update_task_data()
 
         # When a print is canceled by the user, this is the payload that's sent. A couple of seconds later
