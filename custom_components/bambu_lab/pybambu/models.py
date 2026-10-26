@@ -2169,15 +2169,15 @@ class PrintJob:
             self._ams_print_weights = [0.0] * AMS_HT_UNIT_END # TODO: Convert to a dict in the future?
             self._ams_print_lengths = [0.0] * AMS_HT_UNIT_END # TODO: Convert to a dict in the future?
 
+            if cover_image_bytes is not None:
+                self._client._device.cover_image.set_image(cover_image_bytes)
+                LOGGER.debug(f"Cover image set successfully ({len(cover_image_bytes)} bytes).")
+
             for metadata in plate:
                 if (metadata.get('key') == 'index'):
                     # Index is the plate number being printed
                     plate_number = metadata.get('value')
                     LOGGER.debug(f"Plate: {plate_number}")
-
-                    if cover_image_bytes is not None:
-                        self._client._device.cover_image.set_image(cover_image_bytes)
-                        LOGGER.debug("Cover image set successfully.")
 
                     if plate_json_bytes is not None:
                         try:
@@ -2396,11 +2396,33 @@ class PrintJob:
                             break
 
                 active_plate_number = str(self.plate_idx) if self.plate_idx else plate_number
-                cover_entry_name = f"Metadata/plate_{active_plate_number}.png" if active_plate_number else None
+                namelist_map = {name.lower(): name for name in archive.namelist()}
+
+                candidates = []
+                if active_plate_number:
+                    candidates.append(f"Metadata/plate_{active_plate_number}.png")
+                if plate_number and plate_number != active_plate_number:
+                    candidates.append(f"Metadata/plate_{plate_number}.png")
+                candidates.append("Metadata/plate_1.png")
+
+                cover_entry_name = None
+                for c in candidates:
+                    if c.lower() in namelist_map:
+                        cover_entry_name = namelist_map[c.lower()]
+                        break
+
+                if not cover_entry_name:
+                    for name in archive.namelist():
+                        nl = name.lower()
+                        if nl.endswith(".png") and ("plate" in nl or "cover" in nl) and "pick" not in nl:
+                            cover_entry_name = name
+                            break
+
                 cover_image_bytes = None
-                if cover_entry_name and cover_entry_name in archive.namelist():
-                    cover_image_bytes = archive.read(cover_entry_name)
+                if cover_entry_name:
                     try:
+                        cover_image_bytes = archive.read(cover_entry_name)
+                        LOGGER.debug(f"Read cover image ({len(cover_image_bytes)} bytes) from {cover_entry_name}")
                         cover_filename = os.path.splitext(os.path.basename(model_file_path))[0] + '.png'
                         cover_path = os.path.join(model_dir, cover_filename)
                         with open(cover_path, "wb") as f:
@@ -2409,17 +2431,18 @@ class PrintJob:
                     except Exception as e:
                         LOGGER.error(f"Failed to save cover image: {e}")
 
+                target_plate = plate_number or active_plate_number or "1"
                 plate_json_bytes = None
-                if plate_number:
-                    json_entry = f"Metadata/plate_{plate_number}.json"
-                    if json_entry in archive.namelist():
-                        plate_json_bytes = archive.read(json_entry)
+                for jc in [f"Metadata/plate_{target_plate}.json", f"Metadata/plate_{active_plate_number}.json", "Metadata/plate_1.json"]:
+                    if jc and jc.lower() in namelist_map:
+                        plate_json_bytes = archive.read(namelist_map[jc.lower()])
+                        break
 
                 pick_image_bytes = None
-                if plate_number:
-                    pick_entry = f"Metadata/pick_{plate_number}.png"
-                    if pick_entry in archive.namelist():
-                        pick_image_bytes = archive.read(pick_entry)
+                for pc in [f"Metadata/pick_{target_plate}.png", f"Metadata/pick_{active_plate_number}.png", "Metadata/pick_1.png"]:
+                    if pc and pc.lower() in namelist_map:
+                        pick_image_bytes = archive.read(namelist_map[pc.lower()])
+                        break
 
                 if plate_number:
                     try:
