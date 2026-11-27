@@ -1226,7 +1226,28 @@ def task_name_variants(name: str) -> list[str]:
     decoded = html.unescape(name)
     if decoded != name:
         variants.append(decoded)
-    return variants
+
+    # Multi-plate prints: Slicers append suffixes like '_plate_1' or ' Plate 1' to the task name,
+    # but the 3MF file stored on the printer's card retains the base project name.
+    plate_stripped = []
+    for var in variants:
+        base = re.sub(r"[\s_-]+plate[\s_-]*\d+$", "", var, flags=re.IGNORECASE)
+        if base and base != var:
+            plate_stripped.append(base)
+    variants.extend(plate_stripped)
+
+    # Composite object names: Slicers join multiple objects with ' + '. The project file often
+    # carries the first object's name or individual object names.
+    split_variants = []
+    for var in variants:
+        if " + " in var:
+            for part in var.split(" + "):
+                cleaned = part.strip()
+                if cleaned and cleaned != var:
+                    split_variants.append(cleaned)
+    variants.extend(split_variants)
+
+    return list(dict.fromkeys(variants))
 
 
 # Substitutions observed for a character that cannot appear in a file name: the printer's hex
@@ -2172,23 +2193,24 @@ class PrintJob:
         if self._subtask_name != "":
             # No candidate spelling matched. Accept a file whose name matches the task name once
             # case, separators and the substitution of illegal characters are allowed to differ.
-            pattern = model_name_pattern(html.unescape(self._subtask_name))
-            matches = [
-                file for file in remote_files
-                if pattern.fullmatch(strip_model_extension(file.basename))
-            ]
-            if matches:
-                selected = self._rank_model_candidates(matches)[0]
-                LOGGER.debug(
-                    f"Matched task name '{self._subtask_name}' to {selected.path} from "
-                    f"{selected.source}/{selected.storage} by pattern"
-                )
-                aliases = self._remote_file_aliases(matches, selected)
-                remaining = [
-                    file for file in sorted(matches, key=self._model_candidate_score, reverse=True)
-                    if not self._same_remote_media_file(file, selected)
+            for task_variant in task_name_variants(self._subtask_name):
+                pattern = model_name_pattern(html.unescape(task_variant))
+                matches = [
+                    file for file in remote_files
+                    if pattern.fullmatch(strip_model_extension(file.basename))
                 ]
-                return aliases + remaining
+                if matches:
+                    selected = self._rank_model_candidates(matches)[0]
+                    LOGGER.debug(
+                        f"Matched task name '{self._subtask_name}' (variant '{task_variant}') to {selected.path} from "
+                        f"{selected.source}/{selected.storage} by pattern"
+                    )
+                    aliases = self._remote_file_aliases(matches, selected)
+                    remaining = [
+                        file for file in sorted(matches, key=self._model_candidate_score, reverse=True)
+                        if not self._same_remote_media_file(file, selected)
+                    ]
+                    return aliases + remaining
 
         if self._subtask_name == "":
             LOGGER.debug("Falling back to newest remote 3mf file across media sources.")

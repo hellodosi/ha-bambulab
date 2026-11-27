@@ -74,3 +74,40 @@ class TestModelSelectionForRepeatedTaskName(unittest.TestCase):
         selected = self.print_job._select_model_file([root, cache], ["Kostka.gcode.3mf"])
 
         self.assertEqual(selected.path, "/cache/Kostka.gcode.3mf")
+
+    def test_multi_plate_task_name_matches_base_model(self):
+        self.print_job._subtask_name = "Gothmas Cat Night Light _plate_2"
+        self.print_job.gcode_file = "/data/Metadata/plate_2.gcode"
+        model = self.remote("/Gothmas Cat Night Light.gcode.3mf", datetime(2026, 11, 25, tzinfo=timezone.utc))
+
+        selected = self.print_job._select_model_file(
+            [model], self.print_job._model_filenames_to_try()
+        )
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.path, "/Gothmas Cat Night Light.gcode.3mf")
+
+    def test_composite_plus_task_name_matches_object_model(self):
+        self.print_job._subtask_name = "Zylinder + Zylinder + Zylinder + Zylinder"
+        self.print_job.gcode_file = "/data/Metadata/plate_1.gcode"
+        model = self.remote("/Zylinder.gcode.3mf", datetime(2026, 11, 27, tzinfo=timezone.utc))
+
+        selected = self.print_job._select_model_file(
+            [model], self.print_job._model_filenames_to_try()
+        )
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.path, "/Zylinder.gcode.3mf")
+
+    def test_empty_task_name_falls_back_to_newest_remote_3mf(self):
+        self.print_job._subtask_name = ""
+        self.print_job.gcode_file = "/data/Metadata/plate_1.gcode"
+        older = self.remote("/cache/old_job.3mf", datetime(2026, 11, 20, tzinfo=timezone.utc))
+        newer = self.remote("/cache/new_job.3mf", datetime(2026, 11, 27, tzinfo=timezone.utc))
+
+        selected = self.print_job._select_model_file(
+            [older, newer], self.print_job._model_filenames_to_try()
+        )
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.path, "/cache/new_job.3mf")
